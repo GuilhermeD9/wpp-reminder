@@ -1,0 +1,23 @@
+{
+  "name": "lembrete-remedio-whatsapp",
+  "version": "1.0.0",
+  "description": "Sistema de lembretes de remédio via WhatsApp",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "lembrete",
+    "remedio"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.23.0"
+  },
+  "type": "commonjs"
+}

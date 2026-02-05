@@ -1,0 +1,12 @@
+version: '3'
+services:
+  wpp-reminder:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - .wwebjs_auth:/app/.wwebjs_auth
+      - .wwebjs_cache:/app/.wwebjs_cache
