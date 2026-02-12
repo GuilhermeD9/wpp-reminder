@@ -8,12 +8,12 @@ const CONFIG = {
     NUMERO_ALVO: process.env.NUMERO_ALVO, // FORMATO(55 + DDD + NÚMERO) 
     REMEDIOS_POR_HORARIO: {
         '12:00': 'Anticoncepcional',
-        '12:30': 'Rocutan',
-        '14:30': 'Rocutan'
+        '12:30': 'Rocutan'
     }
 };
 
 const respostasPendentes = new Map();
+const agendamentosAtivos = new Map(); // Controle de adiamentos ativos
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -120,6 +120,26 @@ client.on('message', async (message) => {
             setTimeout(() => {
                 enviarLembrete(estadoAtual.horario, true); 
             }, milissegundosAteNoite);
+        } else if (['adiar por 7 dias', 'intervalo', '4'].includes(texto)) {
+            const agora = new Date();
+            const adiamento = new Date();
+            adiamento.setDate(agora.getDate() + 7);
+            
+            await message.reply(`⏰ Remédio adiado por 7 dias. Você será lembrada novamente dia *${adiamento.toLocaleDateString('pt-BR')}*`);
+                        
+            if (estadoAtual.timerId) clearTimeout(estadoAtual.timerId);
+            respostasPendentes.delete(contato);
+            
+            agendamentosAtivos.set(estadoAtual.horario, adiamento);
+            console.log(`📅 Agendamento registrado: ${estadoAtual.horario} → ${adiamento.toLocaleDateString('pt-BR')}`);
+            
+            const milissegundosIntervalo = adiamento - agora;
+            
+            setTimeout(() => {
+                agendamentosAtivos.delete(estadoAtual.horario);
+                console.log(`✅ Agendamento concluído: ${estadoAtual.horario}`);
+                enviarLembrete(estadoAtual.horario, true); 
+            }, milissegundosIntervalo);
         }
     }
 });
@@ -137,6 +157,10 @@ async function enviarLembrete(horarioAtual, isSnooze = false) {
             : `💊 *Hora do ${remedioAtual}*\n\n🤔 Já tomou?`;
 
         mensagem += `\n\n📝 *Responda:*\n1️⃣ Sim\n2️⃣ Adiar (diga os minutos)\n3️⃣ Tomar à noite`;
+
+        if(remedioAtual === 'Anticoncepcional') {
+            mensagem += '\n4️⃣ Adiar por 7 dias';
+        }
         
         await client.sendMessage(numeroReal, mensagem);
         console.log(`📤 ${remedioAtual} → ${numeroReal}`);
@@ -171,6 +195,21 @@ function iniciarAgendador() {
         ultimoMinutoDisparado = horarioFormatado;
 
         if (CONFIG.REMEDIOS_POR_HORARIO[horarioFormatado] && respostasPendentes.size === 0) {
+            const agendamentoAtivo = agendamentosAtivos.get(horarioFormatado);
+            
+            if (agendamentoAtivo) {
+                const agora = new Date();
+                const dataAgendamento = new Date(agendamentoAtivo);
+                
+                if (agora < dataAgendamento) {
+                    console.log(`⏭️ Pulando ${horarioFormatado} - agendado para ${dataAgendamento.toLocaleDateString('pt-BR')}`);
+                    return;
+                } else {
+                    agendamentosAtivos.delete(horarioFormatado);
+                    console.log(`🗑️ Removendo agendamento expirado: ${horarioFormatado}`);
+                }
+            }
+            
             console.log(`🔥 Enviando lembrete: ${horarioFormatado}`);
             enviarLembrete(horarioFormatado, false);
         }
