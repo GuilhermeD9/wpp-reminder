@@ -8,12 +8,12 @@ const CONFIG = {
     NUMERO_ALVO: process.env.NUMERO_ALVO, // FORMATO(55 + DDD + NÚMERO) 
     REMEDIOS_POR_HORARIO: {
         '12:00': 'Anticoncepcional',
-        '12:30': 'Rocutan'
+        '12:30': 'Roacutan'
     }
 };
 
 const respostasPendentes = new Map();
-const agendamentosAtivos = new Map(); // Controle de adiamentos ativos
+const agendamentosAtivos = new Map();
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -215,5 +215,16 @@ function iniciarAgendador() {
         }
     }, 30 * 1000);
 }
+
+client.on('disconnected', (reason) => {
+    console.log(`[${new Date().toLocaleTimeString('pt-BR')}] ❌ Cliente desconectado! Motivo:`, reason);
+    console.log('♻️ Reiniciando o processo à força para o PM2 levantar de novo...');
+    process.exit(1); 
+});
+
+client.on('auth_failure', msg => {
+    console.error(`[${new Date().toLocaleTimeString('pt-BR')}] ❌ Falha na autenticação:`, msg);
+    process.exit(1);
+});
 
 client.initialize();
