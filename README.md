@@ -93,7 +93,6 @@ Você pode usar variáveis de ambiente em vez de editar o código:
 docker run -d \
   --name wpp-reminder \
   -e SEU_NUMERO="(preencha)" \
-  -e REMEDIOS='{"12:00":"Anticoncepcional","12:30":"Rocutan","14:30":"Rocutan"}' \
   --restart unless-stopped \
   -v $(pwd)/data:/app/.wwebjs_auth \
   -v $(pwd)/cache:/app/.wwebjs_cache \
@@ -230,5 +229,6 @@ O sistema verifica os horários a cada 30 segundos, garantindo que nenhum lembre
 MIT License - Sinta-se livre para usar e modificar!
 
 ---
+
 
 **🤖 Robozildo - Seu assistente pessoal de saúde!**
