@@ -9,9 +9,7 @@ services:
       - .env
     volumes:
       - wwebjs_auth:/app/.wwebjs_auth
-      - wwebjs_cache:/app/.wwebjs_cache
     stop_grace_period: 30s
 
 volumes:
   wwebjs_auth:
-  wwebjs_cache:
