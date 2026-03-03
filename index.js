@@ -3,6 +3,8 @@ process.env.TZ = 'America/Sao_Paulo';
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+let ALVO_SEND_ID = null;
+let ALVO_CHAT_ID = null;
 
 const CONFIG = {
     NUMERO_ALVO: process.env.NUMERO_ALVO, // FORMATO(55 + DDD + NÚMERO) 
@@ -16,7 +18,7 @@ const respostasPendentes = new Map();
 const agendamentosAtivos = new Map();
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({ dataPath: process.env.WWEBJS_DATA_PATH || '.wwebjs_auth' }),
     puppeteer: {
         headless: true,
         args: [
@@ -46,7 +48,10 @@ client.on('ready', async () => {
     try {
         console.log(`🔎 Procurando o ID correto para ${CONFIG.NUMERO_ALVO}...`);
         const contato = await client.getNumberId(CONFIG.NUMERO_ALVO);
-        
+
+        ALVO_SEND_ID = contato?._serialized || null;
+        ALVO_CHAT_ID = `${CONFIG.NUMERO_ALVO.replace(/\D/g, '')}@c.us`;
+ 
         if (contato) {
             console.log(`✅ Número encontrado: ${contato._serialized}`);
             console.log(`📩 Enviando mensagem de teste...`);
@@ -68,7 +73,8 @@ ${Object.entries(CONFIG.REMEDIOS_POR_HORARIO).map(([h,r]) => `⏰ ${h} → ${r}`
 client.on('message', async (message) => {
     const contato = message.from;
     
-    if (!contato.includes(CONFIG.NUMERO_ALVO.replace(/\D/g,'').slice(-8))) return;
+    if (!ALVO_CHAT_ID) return;
+    if (message.from !== ALVO_CHAT_ID) return;
 
     const texto = message.body.toLowerCase().trim();
 
@@ -146,10 +152,7 @@ client.on('message', async (message) => {
 
 async function enviarLembrete(horarioAtual, isSnooze = false) {
     try {
-        const user = await client.getNumberId(CONFIG.NUMERO_ALVO)
-        if (!user) return console.error('❌ Número não encontrado');
-
-        const numeroReal = user._serialized;
+        if (!ALVO_SEND_ID) return console.error('❌ ALVO_SEND_ID não definido');
         const remedioAtual = CONFIG.REMEDIOS_POR_HORARIO[horarioAtual]
         
         let mensagem = isSnooze 
@@ -162,16 +165,16 @@ async function enviarLembrete(horarioAtual, isSnooze = false) {
             mensagem += '\n4️⃣ Adiar por 7 dias';
         }
         
-        await client.sendMessage(numeroReal, mensagem);
-        console.log(`📤 ${remedioAtual} → ${numeroReal}`);
+        await client.sendMessage(ALVO_SEND_ID, mensagem);
+        console.log(`📤 ${remedioAtual} → ${ALVO_SEND_ID}`);
         
         const timerId = setTimeout(async () => {
-             if (respostasPendentes.has(numeroReal)) {
-                 await client.sendMessage(numeroReal, '👀 Esqueceu de me responder...\n💊 Já tomou o remédio?');
+             if (respostasPendentes.has(ALVO_CHAT_ID)) {
+                 await client.sendMessage(ALVO_SEND_ID, '👀 Esqueceu de me responder...\n💊 Já tomou o remédio?');
              }
         }, 15 * 60 * 1000);
 
-        respostasPendentes.set(numeroReal, { horario: horarioAtual, timerId });
+        respostasPendentes.set(ALVO_CHAT_ID, { horario: horarioAtual, timerId });
         
         console.log(`📤 Lembrete enviado (Snooze: ${isSnooze})`);
     } catch (error) {
