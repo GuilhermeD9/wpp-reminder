@@ -36,21 +36,7 @@ cd wpp-reminder
 # Configure seu número no index.js antes de buildar
 nano index.js
 
-# Build da imagem
-docker build -t wpp-reminder .
-
-# Criar volumes para persistência
-mkdir -p data cache
-
-# Executar container
-docker run -d \
-  --name wpp-reminder \
-  --restart unless-stopped \
-  -v $(pwd)/data:/app/.wwebjs_auth \
-  -v $(pwd)/cache:/app/.wwebjs_cache \
-  wpp-reminder
-
-# Ou com docker-compose
+#Execute o container docker
 docker-compose up
 ```
 
@@ -73,30 +59,6 @@ const CONFIG = {
 Crie um arquivo `.env`:
 ```bash
 NUMERO_ALVO= '0000000900'
-```
-
-**Opção 3: Docker com variáveis**
-```bash
-docker run -d \
-  --name wpp-reminder \
-  -e NUMERO_ALVO="(preencha)" \
-  --restart unless-stopped \
-  -v $(pwd)/data:/app/.wwebjs_auth \
-  -v $(pwd)/cache:/app/.wwebjs_cache \
-  wpp-reminder
-```
-
-### 3. Variáveis de Ambiente (Opcional)
-Você pode usar variáveis de ambiente em vez de editar o código:
-```bash
-# Com variáveis de ambiente
-docker run -d \
-  --name wpp-reminder \
-  -e SEU_NUMERO="(preencha)" \
-  --restart unless-stopped \
-  -v $(pwd)/data:/app/.wwebjs_auth \
-  -v $(pwd)/cache:/app/.wwebjs_cache \
-  wpp-reminder
 ```
 
 ## 🔧 Instalação Local
@@ -232,3 +194,4 @@ MIT License - Sinta-se livre para usar e modificar!
 
 
 **🤖 Robozildo - Seu assistente pessoal de saúde!**
+
