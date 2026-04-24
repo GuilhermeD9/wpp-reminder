@@ -17,7 +17,7 @@ const CONFIG = {
     NUMERO_ALVO: process.env.NUMERO_ALVO,
     REMEDIOS_POR_HORARIO: {
         '12:00': 'Anticoncepcional',
-        '13:56': 'Roacutan'
+        '12:30': 'Roacutan'
     }
 };
 
@@ -73,6 +73,14 @@ client.on('ready', async () => {
     console.log(`🕒 [WHATSAPP] Hora do Sistema: ${new Date().toLocaleTimeString('pt-BR')}`);
     console.log('---------------------------------------------------');
 
+    const alvoLimpo = CONFIG.NUMERO_ALVO.replace(/\D/g, '');
+    const dataObj = db.readDB();
+    if (dataObj.pendencias[alvoLimpo] && !Array.isArray(dataObj.pendencias[alvoLimpo])) {
+        dataObj.pendencias[alvoLimpo] = [];
+        db.writeDB(dataObj);
+        console.log('🧹 [SISTEMA] Arquitetura antiga detectada. Arquivo purgado para o novo modelo de Fila de Pendências!');
+    }
+
     try {
         console.log(`🔎 [SISTEMA] Procurando a chave ID para o alvo configurado: ${CONFIG.NUMERO_ALVO}...`);
         const contato = await client.getNumberId(CONFIG.NUMERO_ALVO);
@@ -95,6 +103,18 @@ ${Object.entries(CONFIG.REMEDIOS_POR_HORARIO).map(([h,r]) => `⏰ ${h} → ${r}`
     iniciarAgendador();
 });
 
+function transitarFilaParaOProximo(alvoLimpo, dataObj) {
+    if (dataObj.pendencias[alvoLimpo] && dataObj.pendencias[alvoLimpo].length > 0) {
+        dataObj.pendencias[alvoLimpo].shift();
+        db.writeDB(dataObj);
+        
+        // Verifica se sobrou algum remédio acumulado no atraso [1...] e engatilha a mensagem oculta para a frente da fila [0]
+        if (dataObj.pendencias[alvoLimpo].length > 0) {
+            processarFilaLembretes(alvoLimpo, true);
+        }
+    }
+}
+
 /**
  * Evento: Recepção de Mensagens
  * Analisa a palavra-chave enviada pelo contato e aciona ações no Banco de Dados.
@@ -103,21 +123,17 @@ client.on('message', async (message) => {
     const contato = message.from;
     const alvoLimpo = CONFIG.NUMERO_ALVO.replace(/\D/g, ''); // Ex: "551199999999" (Sem arrobas e letras)
     
-    // Proteção rigorosa: Impede que mensagens de estranhos afetem a rotina.
     if (!contato.includes(alvoLimpo.slice(-8))) return;
 
     const texto = message.body.toLowerCase().trim();
     const dataObj = db.readDB();
     
-    if (dataObj.pendencias[alvoLimpo]) {
-        const estadoAtual = dataObj.pendencias[alvoLimpo];
+    if (Array.isArray(dataObj.pendencias[alvoLimpo]) && dataObj.pendencias[alvoLimpo].length > 0) {
+        const estadoAtual = dataObj.pendencias[alvoLimpo][0];
 
-        // Cena 1: A pessoa apertou `2` e o robô está aguardando ela digitar os MINUTOS
         if (estadoAtual.esperandoMinutos && !isNaN(texto) && parseInt(texto) > 0) {
             const minutos = parseInt(texto);
             await message.reply(`✅ Ok! Te lembro em ${minutos} minutos.`);
-            
-            delete dataObj.pendencias[alvoLimpo];
             
             const executarEm = Date.now() + (minutos * 60 * 1000);
             dataObj.lembretesPontuais.push({
@@ -125,36 +141,30 @@ client.on('message', async (message) => {
                 executarEm
             });
             
-            db.writeDB(dataObj);
+            transitarFilaParaOProximo(alvoLimpo, dataObj);
         }
-        // Cena 2: A pessoa confirmou que já tomou
+
         else if (['sim', 's', 'tomei', 'ja tomei', '1'].includes(texto)) {
             await message.reply('✅ Ótimo! Registrei que você tomou. <3');
-            delete dataObj.pendencias[alvoLimpo];
-            db.writeDB(dataObj);
+            transitarFilaParaOProximo(alvoLimpo, dataObj);
         } 
-        // Cena 3: A pessoa pediu pra adiar pra agora à pouco
+
         else if (['adiar', 'espera', 'depois', '2'].includes(texto)) {
             await message.reply('⏰ Por quantos minutos quer adiar?\n💡 Ex: 30, 60, 120...');
             
-            dataObj.pendencias[alvoLimpo] = { 
-                ...estadoAtual, 
-                esperandoMinutos: true
-            };
+            estadoAtual.esperandoMinutos = true;
             db.writeDB(dataObj);
         } 
-        // Cena 4: A pessoa moveu o horário do remédio pra longe no dia
+
         else if (['vou tomar pela noite', 'noite', '3'].includes(texto)) {
             await message.reply('🌙 Perfeito! Registrei que vai tomar à noite.\n⏰ Te lembrarei às 19h.');
-            
-            delete dataObj.pendencias[alvoLimpo];
 
             const agora = new Date();
             const noite = new Date();
             noite.setHours(19, 0, 0, 0);
             
             if (noite <= agora) {
-                noite.setDate(noite.getDate() + 1); // Passa pro dia de amanhã
+                noite.setDate(noite.getDate() + 1);
             }
             
             dataObj.lembretesPontuais.push({
@@ -162,71 +172,103 @@ client.on('message', async (message) => {
                 executarEm: noite.getTime()
             });
             
-            db.writeDB(dataObj);
+            transitarFilaParaOProximo(alvoLimpo, dataObj);
         } 
-        // Cena 5: Especial Anticoncepcional 
+
         else if (['adiar por 7 dias', 'intervalo', '4'].includes(texto)) {
             const agora = new Date();
             const adiamento = new Date();
             adiamento.setDate(agora.getDate() + 7);
             
             await message.reply(`⏰ Remédio adiado por 7 dias. Você será lembrada novamente dia *${adiamento.toLocaleDateString('pt-BR')}*`);
-                        
-            delete dataObj.pendencias[alvoLimpo];
             
             dataObj.agendamentosMestres[estadoAtual.horario] = adiamento.getTime();
             
-            db.writeDB(dataObj);
             console.log(`📅 [DB] Agendamento Mestre gerado: Pular aviso das ${estadoAtual.horario} até ${adiamento.toLocaleDateString('pt-BR')}`);
+            transitarFilaParaOProximo(alvoLimpo, dataObj);
         }
     }
 });
 
 /**
- * Função Base de Disparo.
- * Aciona a API do WhatsApp Web e formata e enfileira uma notificação padrão ou de soneca.
+ * Joga o remédio na Fila do usuário silenciosamente e pede pra verificar se a esteira está travada ou deve enviar o SMS.
  * @param {string} horarioAtual - O index/hora do array CONFIG.REMEDIOS_POR_HORARIO.
- * @param {boolean} isSnooze - Define se o conteúdo da mensagem deve ser redigido como cobrança contínua (Cochilo).
- * @param {string} contatoAlvo - Serial (opcional) de quem deve receber o Lembrete base. Resolve automático se vago.
+ * @param {boolean} isSnooze - O conteúdo da mensagem deve ser redigido como cobrança contínua (Cochilo)?
+ * @param {string} contatoAlvo - Serial (opcional). Resolve automático se vago.
  */
-async function enviarLembrete(horarioAtual, isSnooze = false, contatoAlvo = null) {
+async function adicionarLembreteNaFila(horarioAtual, isSnooze = false, contatoAlvo = null) {
     try {
         let numeroReal = contatoAlvo;
         if (!numeroReal) {
             const user = await client.getNumberId(CONFIG.NUMERO_ALVO)
-            if (!user) return console.error('❌ [WHATSAPP] Falha no disparo: Telefone master não encontrado.');
+            if (!user) return console.error('❌ [WHATSAPP] Falha no enfileiramento: Telefone master não encontrado.');
             numeroReal = user._serialized;
         }
 
         const remedioAtual = CONFIG.REMEDIOS_POR_HORARIO[horarioAtual];
         if (!remedioAtual) return;
         
-        let mensagem = isSnooze 
-            ? `⏰ *Soneca acabou!*\n🌙 Hora de tomar o *${remedioAtual}*`
-            : `💊 *Hora do ${remedioAtual}*\n\n🤔 Já tomou?`;
-
-        mensagem += `\n\n📝 *Responda:*\n1️⃣ Sim\n2️⃣ Adiar (diga os minutos)\n3️⃣ Tomar à noite`;
-
-        if(remedioAtual === 'Anticoncepcional') {
-            mensagem += '\n4️⃣ Adiar por 7 dias';
-        }
-        
-        await client.sendMessage(numeroReal, mensagem);
-        console.log(`📤 [DISPARO] ${remedioAtual} → Notificado com êxito (*Snooze: ${isSnooze})`);
-        
-        // Bloqueia e sinaliza que o bot aguarda um retorno daquele contato sobre este remédio
         const alvoLimpo = CONFIG.NUMERO_ALVO.replace(/\D/g, '');
         const dataObj = db.readDB();
-        dataObj.pendencias[alvoLimpo] = { 
+        
+        if (!Array.isArray(dataObj.pendencias[alvoLimpo])) {
+            dataObj.pendencias[alvoLimpo] = [];
+        }
+
+        dataObj.pendencias[alvoLimpo].push({ 
             horario: horarioAtual, 
             numeroSerializado: numeroReal,
             esperandoMinutos: false,
-            dataEnvio: Date.now(),
-            avisosEnviados: 1
-        };
+            dataEnvio: null,
+            avisosEnviados: 0,
+            isSnooze: isSnooze,
+            remedioNome: remedioAtual
+        });
+        
         db.writeDB(dataObj);
+        console.log(`📥 [FILA] ${remedioAtual} (${horarioAtual}) enfileirado para cobrança (Total na Fila: ${dataObj.pendencias[alvoLimpo].length})`);
+        
+        processarFilaLembretes(alvoLimpo);
     } catch (error) {
-        console.error('❌ [ERRO] Evento adverso ao despachar Lembrete:', error);
+        console.error('❌ [ERRO] Evento adverso ao enfileirar Lembrete:', error);
+    }
+}
+
+/**
+ * Analisa a fila do usuário e Dispara se a posição 0 estiver virgêm (Não notificada ainda).
+ * @param {string} alvoLimpo - Target
+ * @param {boolean} isRecuperado - A Fila do bot acabou de transitar e isso era algo que estava oculto no passado esperando?
+ */
+async function processarFilaLembretes(alvoLimpo, isRecuperado = false) {
+    const dataObj = db.readDB();
+    const fila = dataObj.pendencias[alvoLimpo];
+
+    if (!Array.isArray(fila) || fila.length === 0) return;
+
+    const pacienteVez = fila[0]; // Operamos e cobramos sempre o mais antigo que sobrou na esteira
+
+    if (pacienteVez.dataEnvio === null) {
+        let mensagem = pacienteVez.isSnooze 
+            ? `⏰ *Soneca acabou!*\n🌙 Hora de tomar o *${pacienteVez.remedioNome}*`
+            : `💊 *Hora do ${pacienteVez.remedioNome}*\n\n🤔 Já tomou?`;
+
+        if (isRecuperado) {
+            mensagem = `👀 *Aproveitando...*\nVocê ainda tinha esse remédio pendente lá das ${pacienteVez.horario}:\n\n💊 *${pacienteVez.remedioNome}*\n\nJá tomou esse também?`;
+        }
+
+        mensagem += `\n\n📝 *Responda:*\n1️⃣ Sim\n2️⃣ Adiar (diga os minutos)\n3️⃣ Tomar à noite`;
+
+        if(pacienteVez.remedioNome === 'Anticoncepcional') {
+            mensagem += '\n4️⃣ Adiar por 7 dias';
+        }
+        
+        await client.sendMessage(pacienteVez.numeroSerializado, mensagem);
+        console.log(`📤 [DISPARO] ${pacienteVez.remedioNome} → Notificado ao usuário (*Snooze/Recuperado: ${pacienteVez.isSnooze || isRecuperado})`);
+        
+        // Liga o motorzinho interno pra que o Loop de 15min te perturbe e tranca o envio duplo
+        pacienteVez.dataEnvio = Date.now();
+        pacienteVez.avisosEnviados = 1;
+        db.writeDB(dataObj);
     }
 }
 
@@ -269,14 +311,17 @@ function iniciarAgendador() {
                 
                 if (podeMandar) {
                     console.log(`🔥 [CRON] Hora detectada! Emitindo rotina das ${horarioFormatado}`);
-                    enviarLembrete(horarioFormatado, false);
+                    adicionarLembreteNaFila(horarioFormatado, false);
                 }
             }
         }
 
         // TAREFA 2: Sistema Anti-Ignorados (Cobrança a cada 15 min pro paciente)
-        for (const [alvo, estado] of Object.entries(dataObj.pendencias)) {
-            if (estado.esperandoMinutos) continue; // Trava aguardando ele apenas escrever os "Minutos"
+        for (const [alvo, fila] of Object.entries(dataObj.pendencias)) {
+            if (!Array.isArray(fila) || fila.length === 0) continue;
+            
+            const estado = fila[0]; // Só cobra quem está travando a porta [0]
+            if (estado.esperandoMinutos || estado.dataEnvio === null) continue; 
 
             const tempoDecorrido = timestampAgora - estado.dataEnvio;
             const minutosDecorridos = Math.floor(tempoDecorrido / 60000);
@@ -300,7 +345,7 @@ function iniciarAgendador() {
         for (const pontual of dataObj.lembretesPontuais) {
             if (timestampAgora >= pontual.executarEm) {
                 console.log(`🔥 [CRON] Soneca/Noite vencida alcançada para a dose das ${pontual.horarioOriginal}`);
-                enviarLembrete(pontual.horarioOriginal, true);
+                adicionarLembreteNaFila(pontual.horarioOriginal, true); // Ao disparar "adiados", jogamos na fila e botamos a pessoa no cabresto novamente.
                 mudouDb = true;
             } else {
                 restantes.push(pontual);
