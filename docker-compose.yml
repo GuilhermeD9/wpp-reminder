@@ -9,7 +9,9 @@ services:
       - .env
     volumes:
       - wwebjs_auth:/app/.wwebjs_auth
+      - wpp_data:/app/data
     stop_grace_period: 30s
 
 volumes:
   wwebjs_auth:
+  wpp_data:
